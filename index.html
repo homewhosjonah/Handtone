@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Handtone — hand-tracked theremin</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');
+
+  :root{
+    --bg: #0B0C10;
+    --panel: #14171D;
+    --panel-2: #1B1F27;
+    --line: #262B34;
+    --text: #F2EFEA;
+    --text-dim: #8D93A0;
+    --accent: #E8A33D;   /* brass — rail, ticks */
+    --accent-2: #5EEAD4; /* cyan — hand marker, live pitch */
+    --danger: #E8613D;
+  }
+  *{ box-sizing: border-box; }
+  html,body{ height:100%; }
+  body{
+    margin:0;
+    background:
+      radial-gradient(1200px 600px at 20% -10%, #171B22 0%, transparent 60%),
+      radial-gradient(900px 500px at 100% 110%, #14181F 0%, transparent 55%),
+      var(--bg);
+    color:var(--text);
+    font-family:'Inter', ui-sans-serif, system-ui, sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .app{ max-width:1180px; margin:0 auto; padding:28px 20px 40px; }
+
+  header{ margin-bottom:22px; display:flex; align-items:flex-end; justify-content:space-between; gap:16px; flex-wrap:wrap; }
+  header h1{
+    font-family:'Space Grotesk', ui-sans-serif, sans-serif;
+    font-weight:700; font-size:28px; letter-spacing:-0.01em; margin:0 0 4px;
+  }
+  header h1 span{ color:var(--accent); }
+  header p{ margin:0; color:var(--text-dim); font-size:13.5px; max-width:52ch; line-height:1.5; }
+  .status-pill{
+    display:flex; align-items:center; gap:8px; font-size:12.5px; color:var(--text-dim);
+    background:var(--panel); border:1px solid var(--line); padding:7px 12px; border-radius:999px;
+  }
+  .dot{ width:8px; height:8px; border-radius:50%; background:#555; transition:background .2s, box-shadow .2s; }
+  .dot.live{ background:var(--accent-2); box-shadow:0 0 10px var(--accent-2); }
+
+  main{ display:grid; grid-template-columns: 1.5fr 0.45fr 0.85fr; gap:16px; align-items:stretch; }
+  @media (max-width: 860px){ main{ grid-template-columns: 1fr; } }
+
+  .panel{
+    background:var(--panel); border:1px solid var(--line); border-radius:16px;
+    padding:14px; position:relative;
+  }
+  .panel h2{
+    font-family:'Space Grotesk', sans-serif; font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+    color:var(--text-dim); margin:0 0 10px; font-weight:600;
+  }
+
+  /* Camera panel */
+  .camera-frame{
+    position:relative; width:100%; aspect-ratio: 4/3; border-radius:12px; overflow:hidden;
+    background:linear-gradient(160deg, #1B2029, #101319); border:1px solid var(--line);
+  }
+  canvas#display{ width:100%; height:100%; display:block; }
+  .marker{
+    position:absolute; width:34px; height:34px; margin:-17px 0 0 -17px; border-radius:50%;
+    border:2px solid var(--accent-2); box-shadow:0 0 18px var(--accent-2), inset 0 0 12px rgba(94,234,212,.35);
+    pointer-events:none; opacity:0; transition:opacity .15s, left .05s linear, top .05s linear;
+  }
+  .cam-overlay{
+    position:absolute; inset:0; display:flex; align-items:center; justify-content:center; flex-direction:column;
+    gap:10px; text-align:center; padding:20px; background:rgba(11,12,16,.72); backdrop-filter:blur(2px);
+  }
+  .cam-overlay.hidden{ display:none; }
+  .cam-overlay p{ color:var(--text-dim); font-size:13px; max-width:32ch; margin:0; }
+  button{
+    font-family:'Space Grotesk', sans-serif; font-weight:600; font-size:13.5px; letter-spacing:.01em;
+    border-radius:10px; padding:10px 18px; border:1px solid var(--line); cursor:pointer;
+    background:var(--panel-2); color:var(--text); transition:transform .08s ease, border-color .15s, background .15s;
+  }
+  button:hover{ border-color:#3A4150; }
+  button:active{ transform:scale(.97); }
+  button.primary{ background:var(--accent); color:#1A1200; border-color:var(--accent); }
+  button.primary:hover{ background:#F0AF4F; }
+  button.stop{ background:transparent; color:var(--danger); border-color:#4a2c22; }
+
+  .hint-row{ display:flex; gap:8px; align-items:center; justify-content:center; margin-top:2px; }
+  .checkbox-row{ display:flex; align-items:center; gap:7px; font-size:12px; color:var(--text-dim); margin-top:4px; }
+
+  /* Pitch rail — signature element */
+  .rail-panel{ display:flex; flex-direction:column; }
+  .rail-wrap{
+    flex:1; position:relative; background:linear-gradient(180deg, #171A20, #0F1116);
+    border:1px solid var(--line); border-radius:12px; overflow:hidden; min-height:340px;
+  }
+  .rail-track{
+    position:absolute; left:50%; top:14px; bottom:14px; width:3px; margin-left:-1.5px;
+    background:linear-gradient(180deg, var(--accent), #3a2c10);
+    box-shadow:0 0 12px rgba(232,163,61,.35);
+    border-radius:3px;
+  }
+  .tick{
+    position:absolute; left:50%; display:flex; align-items:center; gap:6px;
+    transform:translate(-50%, -50%);
+  }
+  .tick .tm{ width:12px; height:1px; background:var(--line); }
+  .tick.root .tm{ width:18px; background:var(--accent); }
+  .tick .lbl{
+    position:absolute; left:14px; font-size:10px; color:var(--text-dim); font-family:'Space Grotesk',sans-serif;
+    white-space:nowrap;
+  }
+  .tick.root .lbl{ color:var(--accent); }
+  .puck{
+    position:absolute; left:50%; width:22px; height:22px; margin:-11px 0 0 -11px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #eafffb, var(--accent-2));
+    box-shadow:0 0 22px var(--accent-2), 0 0 6px #fff;
+    opacity:0; transition:opacity .2s; top:50%;
+  }
+  .puck-trail{
+    position:absolute; left:50%; width:2px; margin-left:-1px; background:linear-gradient(180deg, rgba(94,234,212,.5), transparent);
+    opacity:0; transition:opacity .2s;
+  }
+
+  /* Controls panel */
+  .controls-panel{ display:flex; flex-direction:column; gap:14px; }
+  .field{ display:flex; flex-direction:column; gap:6px; }
+  .field label{ font-size:11.5px; color:var(--text-dim); font-family:'Space Grotesk', sans-serif; letter-spacing:.03em; text-transform:uppercase; }
+  select, input[type=range]{
+    width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--text);
+    border-radius:8px; padding:8px 10px; font-family:'Inter',sans-serif; font-size:13px;
+  }
+  input[type=range]{ padding:0; height:26px; accent-color:var(--accent); }
+  .seg{ display:flex; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .seg button{ flex:1; border:none; border-radius:0; background:var(--panel-2); font-size:12.5px; padding:8px 6px; }
+  .seg button.active{ background:var(--accent); color:#1A1200; }
+
+  footer{
+    margin-top:16px; display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+    background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:16px 20px;
+  }
+  .note-readout{ display:flex; align-items:baseline; gap:14px; }
+  .note-big{ font-family:'Space Grotesk',sans-serif; font-weight:700; font-size:38px; color:var(--accent-2); min-width:80px; letter-spacing:-0.01em; }
+  .note-sub{ color:var(--text-dim); font-size:13px; }
+  .vol-field{ display:flex; align-items:center; gap:10px; min-width:200px; }
+  .vol-field label{ font-size:11.5px; color:var(--text-dim); font-family:'Space Grotesk',sans-serif; white-space:nowrap; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>Hand<span>tone</span></h1>
+      <p>Raise your hand to reach for the high notes, lower it for the low ones. Move left–right to brighten or darken the tone. No sensors, no gloves — just your camera.</p>
+    </div>
+    <div class="status-pill"><span class="dot" id="statusDot"></span><span id="statusText">Camera off</span></div>
+  </header>
+
+  <main>
+    <section class="panel">
+      <h2>Tracking view</h2>
+      <div class="camera-frame">
+        <video id="video" autoplay playsinline muted hidden></video>
+        <canvas id="display"></canvas>
+        <div class="marker" id="marker"></div>
+        <div class="cam-overlay" id="camOverlay">
+          <button class="primary" id="startBtn">Start camera</button>
+          <p id="overlayMsg">Uses your webcam locally — nothing is recorded or sent anywhere.</p>
+          <div class="checkbox-row">
+            <input type="checkbox" id="mouseSim"><label for="mouseSim">Use mouse / touch instead of a hand</label>
+          </div>
+        </div>
+      </div>
+      <div class="hint-row" id="stopRow" style="display:none; margin-top:10px;">
+        <button class="stop" id="stopBtn">Stop</button>
+      </div>
+    </section>
+
+    <section class="panel rail-panel">
+      <h2>Pitch rail</h2>
+      <div class="rail-wrap" id="railWrap">
+        <div class="rail-track"></div>
+        <div class="puck-trail" id="puckTrail"></div>
+        <div class="puck" id="puck"></div>
+      </div>
+    </section>
+
+    <section class="panel controls-panel">
+      <h2>Instrument</h2>
+      <div class="field">
+        <label>Pitch mode</label>
+        <div class="seg">
+          <button id="modeGlide" class="active">Glide</button>
+          <button id="modeSteps">Steps</button>
+        </div>
+      </div>
+      <div class="field">
+        <label>Scale</label>
+        <select id="scaleSelect">
+          <option value="pentatonic" selected>Pentatonic</option>
+          <option value="major">Major</option>
+          <option value="minor">Minor</option>
+          <option value="chromatic">Chromatic</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Root note</label>
+        <select id="rootSelect">
+          <option>C</option><option>C#</option><option>D</option><option>D#</option>
+          <option>E</option><option>F</option><option>F#</option><option>G</option>
+          <option>G#</option><option>A</option><option>A#</option><option>B</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Waveform</label>
+        <select id="waveSelect">
+          <option value="sine" selected>Sine</option>
+          <option value="triangle">Triangle</option>
+          <option value="sawtooth">Sawtooth</option>
+          <option value="square">Square</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Range (octaves)</label>
+        <input type="range" id="octaveRange" min="1" max="3" step="1" value="2">
+      </div>
+      <div class="field">
+        <label>Tracking method</label>
+        <select id="trackSelect">
+          <option value="skin" selected>Skin tone</option>
+          <option value="bright">Brightest spot</option>
+        </select>
+      </div>
+      <div class="field">
+        <label>Sensitivity</label>
+        <input type="range" id="sensRange" min="1" max="10" step="1" value="5">
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="note-readout">
+      <div class="note-big" id="noteBig">—</div>
+      <div class="note-sub" id="noteSub">move your hand to begin</div>
+    </div>
+    <div class="vol-field">
+      <label>Volume</label>
+      <input type="range" id="volRange" min="0" max="100" step="1" value="65">
+    </div>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- Music theory ----------
+  const NOTES = ["C","C#","D","D#","E","F","F#","G","G#","A","A#","B"];
+  const ROOT_FREQ = { C:261.6256,"C#":277.1826,D:293.6648,"D#":311.1270,E:329.6276,F:349.2282,
+    "F#":369.9944,G:391.9954,"G#":415.3047,A:440.0000,"A#":466.1638,B:493.8833 };
+  const SCALES = {
+    major:[0,2,4,5,7,9,11], minor:[0,2,3,5,7,8,10],
+    pentatonic:[0,2,4,7,9], chromatic:[0,1,2,3,4,5,6,7,8,9,10,11]
+  };
+
+  function noteLabel(root, semitoneOffset){
+    const rootIdx = NOTES.indexOf(root);
+    const abs = rootIdx + semitoneOffset;
+    const octave = 4 + Math.floor(abs/12);
+    const name = NOTES[((abs%12)+12)%12];
+    return name+octave;
+  }
+
+  function buildTicks(root, scaleName, octaves){
+    const degrees = SCALES[scaleName];
+    const ticks = [];
+    for(let o=0;o<=octaves;o++){
+      for(let di=0; di<degrees.length; di++){
+        if(o===octaves && di>0) break;
+        const semitone = o*12+degrees[di];
+        ticks.push({ semitone, name: noteLabel(root, semitone), isRoot: (semitone % 12 === 0) });
+      }
+    }
+    return ticks;
+  }
+
+  // ---------- State ----------
+  const state = {
+    running:false, mouseSim:false, cameraReady:false,
+    mode:'glide', scale:'pentatonic', root:'C', waveform:'sine',
+    octaves:2, sensitivity:5, trackBy:'skin', volume:0.65,
+    ticks: buildTicks('C','pentatonic',2),
+    smoothX:0.5, smoothY:0.5, detected:false, lastDetectedTs:0,
+    currentTickIndex:null
+  };
+
+  // ---------- DOM ----------
+  const $ = id => document.getElementById(id);
+  const video = $('video'), display = $('display'), marker = $('marker');
+  const camOverlay = $('camOverlay'), startBtn = $('startBtn'), stopBtn = $('stopBtn'), stopRow = $('stopRow');
+  const statusDot = $('statusDot'), statusText = $('statusText');
+  const mouseSimBox = $('mouseSim');
+  const railWrap = $('railWrap'), puck = $('puck'), puckTrail = $('puckTrail');
+  const noteBig = $('noteBig'), noteSub = $('noteSub');
+  const overlayMsg = $('overlayMsg');
+
+  const displayCtx = display.getContext('2d', { willReadFrequently:false });
+  const sampleCanvas = document.createElement('canvas');
+  const SW=64, SH=48;
+  sampleCanvas.width=SW; sampleCanvas.height=SH;
+  const sampleCtx = sampleCanvas.getContext('2d', { willReadFrequently:true });
+
+  // ---------- Audio ----------
+  let audioCtx=null, osc=null, filterNode=null, gainNode=null, delayNode=null, feedbackGain=null, wetGain=null, dryGain=null;
+
+  function setupAudio(){
+    if(audioCtx) return;
+    audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    osc = audioCtx.createOscillator();
+    osc.type = state.waveform;
+    osc.frequency.value = ROOT_FREQ[state.root];
+
+    filterNode = audioCtx.createBiquadFilter();
+    filterNode.type='lowpass'; filterNode.frequency.value=4000; filterNode.Q.value=0.6;
+
+    gainNode = audioCtx.createGain(); gainNode.gain.value = 0;
+
+    dryGain = audioCtx.createGain(); dryGain.gain.value = 0.9;
+    delayNode = audioCtx.createDelay(); delayNode.delayTime.value = 0.22;
+    feedbackGain = audioCtx.createGain(); feedbackGain.gain.value = 0.22;
+    wetGain = audioCtx.createGain(); wetGain.gain.value = 0.22;
+
+    osc.connect(filterNode);
+    filterNode.connect(gainNode);
+    gainNode.connect(dryGain); dryGain.connect(audioCtx.destination);
+    gainNode.connect(delayNode);
+    delayNode.connect(feedbackGain); feedbackGain.connect(delayNode);
+    delayNode.connect(wetGain); wetGain.connect(audioCtx.destination);
+
+    osc.start();
+  }
+
+  function setNoteDisplay(freq, name){
+    noteBig.textContent = name || (freq ? freq.toFixed(1)+' Hz' : '—');
+    noteSub.textContent = name ? freq.toFixed(1)+' Hz' : (freq ? 'gliding' : 'move your hand to begin');
+  }
+
+  function updateAudio(xNorm, yNorm){
+    if(!audioCtx) return;
+    const t = yNorm; // 0 top (high pitch) .. 1 bottom (low pitch)
+    const now = audioCtx.currentTime;
+    if(state.mode==='glide'){
+      const span = state.octaves*12;
+      const semitone = (1-t)*span;
+      const freq = ROOT_FREQ[state.root]*Math.pow(2, semitone/12);
+      osc.frequency.setTargetAtTime(freq, now, 0.025);
+      setNoteDisplay(freq, null);
+      state.currentTickIndex = null;
+    } else {
+      const n = state.ticks.length;
+      const idx = Math.max(0, Math.min(n-1, Math.round((1-t)*(n-1))));
+      if(idx !== state.currentTickIndex){
+        state.currentTickIndex = idx;
+        const tk = state.ticks[idx];
+        const freq = ROOT_FREQ[state.root]*Math.pow(2, tk.semitone/12);
+        osc.frequency.setTargetAtTime(freq, now, 0.045);
+        setNoteDisplay(freq, tk.name);
+      }
+    }
+    const xm = 1 - xNorm; // mirrored: hand to the right -> brighter
+    const cutoff = 350 + xm*7200;
+    filterNode.frequency.setTargetAtTime(cutoff, now, 0.06);
+    gainNode.gain.setTargetAtTime(state.volume, now, 0.05);
+  }
+
+  function fadeAudioOut(){
+    if(!audioCtx) return;
+    gainNode.gain.setTargetAtTime(0, audioCtx.currentTime, 0.18);
+  }
+
+  // ---------- Rail rendering ----------
+  function renderRail(){
+    railWrap.querySelectorAll('.tick').forEach(n=>n.remove());
+    const ticks = state.ticks;
+    const n = ticks.length;
+    ticks.forEach((tk,i)=>{
+      const topPct = (1 - i/(n-1)) * 100;
+      const el = document.createElement('div');
+      el.className = 'tick' + (tk.isRoot ? ' root':'');
+      el.style.top = topPct+'%';
+      el.innerHTML = '<div class="tm"></div><div class="lbl">'+tk.name+'</div>';
+      railWrap.appendChild(el);
+    });
+  }
+
+  function updateRailPuck(yNorm, visible){
+    if(!visible){ puck.style.opacity=0; puckTrail.style.opacity=0; return; }
+    const topPct = yNorm*100;
+    puck.style.top = topPct+'%';
+    puck.style.opacity = 1;
+    puckTrail.style.top = topPct+'%';
+    puckTrail.style.height = (100-topPct)+'%';
+    puckTrail.style.opacity = 0.6;
+  }
+
+  // ---------- Detection ----------
+  function isSkinTone(r,g,b, sensitivity){
+    const Y = 0.299*r+0.587*g+0.114*b;
+    const Cb = 128 - 0.168736*r - 0.331264*g + 0.5*b;
+    const Cr = 128 + 0.5*r - 0.418688*g - 0.081312*b;
+    const tol = sensitivity*3;
+    return Y>45 && Cb>(77-tol) && Cb<(135+tol) && Cr>(131-tol) && Cr<(178+tol);
+  }
+
+  function detectHand(){
+    sampleCtx.drawImage(video, 0,0, SW, SH);
+    let data;
+    try{ data = sampleCtx.getImageData(0,0,SW,SH).data; } catch(e){ return null; }
+    let sumX=0, sumY=0, count=0;
+    if(state.trackBy==='skin'){
+      for(let y=0;y<SH;y++){
+        for(let x=0;x<SW;x++){
+          const idx=(y*SW+x)*4;
+          if(isSkinTone(data[idx],data[idx+1],data[idx+2], state.sensitivity)){
+            sumX+=x; sumY+=y; count++;
+          }
+        }
+      }
+    } else {
+      const threshold = 255 - state.sensitivity*15;
+      for(let y=0;y<SH;y++){
+        for(let x=0;x<SW;x++){
+          const idx=(y*SW+x)*4;
+          const lum = 0.299*data[idx]+0.587*data[idx+1]+0.114*data[idx+2];
+          if(lum>threshold){ sumX+=x; sumY+=y; count++; }
+        }
+      }
+    }
+    const minPixels = 10;
+    if(count>minPixels){
+      return { x: sumX/count/SW, y: sumY/count/SH };
+    }
+    return null;
+  }
+
+  // ---------- Mouse / touch fallback ----------
+  let mousePos = null;
+  function updateMouseFromEvent(e){
+    const rect = display.getBoundingClientRect();
+    const cx = e.touches ? e.touches[0].clientX : e.clientX;
+    const cy = e.touches ? e.touches[0].clientY : e.clientY;
+    let x = (cx-rect.left)/rect.width;
+    let y = (cy-rect.top)/rect.height;
+    x = Math.max(0, Math.min(1, x));
+    y = Math.max(0, Math.min(1, y));
+    mousePos = { x: 1-x, y }; // stored unmirrored to match camera coord convention
+  }
+  display.addEventListener('mousemove', e=>{ if(state.mouseSim) updateMouseFromEvent(e); });
+  display.addEventListener('touchmove', e=>{ if(state.mouseSim){ updateMouseFromEvent(e); e.preventDefault(); } }, {passive:false});
+  display.addEventListener('mouseleave', ()=>{ if(state.mouseSim) mousePos=null; });
+
+  // ---------- Camera ----------
+  async function startCamera(){
+    try{
+      const stream = await navigator.mediaDevices.getUserMedia({ video:{ facingMode:'user', width:{ideal:640}, height:{ideal:480} }, audio:false });
+      video.srcObject = stream;
+      await video.play();
+      state.cameraReady = true;
+      display.width = 640; display.height = 480;
+    }catch(err){
+      state.cameraReady = false;
+      overlayMsg.textContent = "Couldn't access the camera — check permissions, or use mouse/touch instead.";
+      mouseSimBox.checked = true;
+      state.mouseSim = true;
+      display.width = 640; display.height = 480;
+    }
+  }
+
+  function stopCamera(){
+    if(video.srcObject){
+      video.srcObject.getTracks().forEach(t=>t.stop());
+      video.srcObject = null;
+    }
+    state.cameraReady = false;
+  }
+
+  // ---------- Draw ----------
+  function drawFrame(handPos){
+    displayCtx.save();
+    displayCtx.clearRect(0,0,display.width, display.height);
+    displayCtx.translate(display.width,0);
+    displayCtx.scale(-1,1);
+    if(state.cameraReady){
+      displayCtx.drawImage(video, 0,0, display.width, display.height);
+    } else {
+      const g = displayCtx.createLinearGradient(0,0,0,display.height);
+      g.addColorStop(0,'#1B2029'); g.addColorStop(1,'#0F1116');
+      displayCtx.fillStyle=g;
+      displayCtx.fillRect(0,0,display.width, display.height);
+    }
+    displayCtx.restore();
+
+    if(handPos){
+      const mx = (1-handPos.x)*display.clientWidth;
+      const my = handPos.y*display.clientHeight;
+      marker.style.left = mx+'px';
+      marker.style.top = my+'px';
+      marker.style.opacity = 1;
+    } else {
+      marker.style.opacity = 0;
+    }
+  }
+
+  // ---------- Main loop ----------
+  let rafId = null, lastProcess = 0;
+  const FRAME_INTERVAL = 45; // ms, ~22fps for detection
+
+  function loop(ts){
+    rafId = requestAnimationFrame(loop);
+    if(!state.running) return;
+
+    let result = null;
+    if(state.mouseSim){
+      result = mousePos;
+    } else if(state.cameraReady && video.readyState>=2 && (ts-lastProcess)>=FRAME_INTERVAL){
+      lastProcess = ts;
+      result = detectHand();
+    } else if(state.cameraReady){
+      result = state.detected ? {x:state.smoothX, y:state.smoothY} : null;
+    }
+
+    if(result){
+      state.detected = true;
+      state.lastDetectedTs = ts;
+      state.smoothX += (result.x - state.smoothX)*0.35;
+      state.smoothY += (result.y - state.smoothY)*0.35;
+      updateAudio(state.smoothX, state.smoothY);
+      updateRailPuck(state.smoothY, true);
+      statusDot.classList.add('live');
+      statusText.textContent = state.mouseSim ? 'Tracking (mouse)' : 'Tracking hand';
+    } else {
+      if(ts - state.lastDetectedTs > 260){
+        if(state.detected){ fadeAudioOut(); updateRailPuck(0,false); }
+        state.detected = false;
+        statusDot.classList.remove('live');
+        statusText.textContent = state.cameraReady || state.mouseSim ? 'No hand found' : 'Camera off';
+      }
+    }
+    drawFrame(state.detected ? {x:state.smoothX, y:state.smoothY} : null);
+  }
+
+  // ---------- Controls wiring ----------
+  startBtn.addEventListener('click', async ()=>{
+    setupAudio();
+    if(audioCtx.state==='suspended') await audioCtx.resume();
+    if(!mouseSimBox.checked){ await startCamera(); }
+    else { state.mouseSim = true; }
+    state.running = true;
+    camOverlay.classList.add('hidden');
+    stopRow.style.display='flex';
+    if(!rafId) rafId = requestAnimationFrame(loop);
+  });
+
+  stopBtn.addEventListener('click', ()=>{
+    state.running = false;
+    fadeAudioOut();
+    stopCamera();
+    camOverlay.classList.remove('hidden');
+    stopRow.style.display='none';
+    marker.style.opacity=0;
+    updateRailPuck(0,false);
+    statusDot.classList.remove('live');
+    statusText.textContent = 'Camera off';
+    noteBig.textContent='—'; noteSub.textContent='move your hand to begin';
+  });
+
+  mouseSimBox.addEventListener('change', ()=>{ state.mouseSim = mouseSimBox.checked; });
+
+  $('modeGlide').addEventListener('click', ()=>{
+    state.mode='glide'; $('modeGlide').classList.add('active'); $('modeSteps').classList.remove('active');
+    state.currentTickIndex = null;
+  });
+  $('modeSteps').addEventListener('click', ()=>{
+    state.mode='steps'; $('modeSteps').classList.add('active'); $('modeGlide').classList.remove('active');
+    state.currentTickIndex = null;
+  });
+
+  $('scaleSelect').addEventListener('change', e=>{
+    state.scale = e.target.value;
+    state.ticks = buildTicks(state.root, state.scale, state.octaves);
+    state.currentTickIndex = null;
+    renderRail();
+  });
+  $('rootSelect').addEventListener('change', e=>{
+    state.root = e.target.value;
+    state.ticks = buildTicks(state.root, state.scale, state.octaves);
+    state.currentTickIndex = null;
+    renderRail();
+  });
+  $('waveSelect').addEventListener('change', e=>{
+    state.waveform = e.target.value;
+    if(osc) osc.type = state.waveform;
+  });
+  $('octaveRange').addEventListener('input', e=>{
+    state.octaves = parseInt(e.target.value,10);
+    state.ticks = buildTicks(state.root, state.scale, state.octaves);
+    state.currentTickIndex = null;
+    renderRail();
+  });
+  $('trackSelect').addEventListener('change', e=>{ state.trackBy = e.target.value; });
+  $('sensRange').addEventListener('input', e=>{ state.sensitivity = parseInt(e.target.value,10); });
+  $('volRange').addEventListener('input', e=>{
+    state.volume = parseInt(e.target.value,10)/100;
+    if(gainNode && state.detected) gainNode.gain.setTargetAtTime(state.volume, audioCtx.currentTime, 0.05);
+  });
+
+  // ---------- Init ----------
+  display.width = 640; display.height = 480;
+  renderRail();
+})();
+</script>
+</body>
+</html>
