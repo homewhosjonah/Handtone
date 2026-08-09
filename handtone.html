@@ -155,7 +155,7 @@
   <header>
     <div>
       <h1>Hand<span>tone</span></h1>
-      <p>Full hand skeleton tracking. Pitch follows your <strong>index fingertip</strong> up and down — raise it for high notes, lower it for low ones. Move it left–right to brighten or darken the tone.</p>
+      <p>Full hand skeleton tracking. Pitch follows the fingertip you choose (Instrument panel) up and down — raise it for high notes, lower it for low ones. Move it left–right to brighten or darken the tone.</p>
     </div>
     <div class="status-pill"><span class="dot" id="statusDot"></span><span id="statusText">Camera off</span></div>
   </header>
@@ -231,13 +231,23 @@
         <label>Range (octaves)</label>
         <input type="range" id="octaveRange" min="1" max="3" step="1" value="2">
       </div>
+      <div class="field">
+        <label>Pitch finger</label>
+        <select id="fingerSelect">
+          <option value="4">Thumb</option>
+          <option value="8" selected>Index</option>
+          <option value="12">Middle</option>
+          <option value="16">Ring</option>
+          <option value="20">Pinky</option>
+        </select>
+      </div>
     </section>
   </main>
 
   <footer>
     <div class="note-readout">
       <div class="note-big" id="noteBig">—</div>
-      <div class="note-sub" id="noteSub">move your index finger to begin</div>
+      <div class="note-sub" id="noteSub">move your fingertip to begin</div>
     </div>
     <div class="vol-field">
       <label>Volume</label>
@@ -289,13 +299,13 @@
     [13,17],[17,18],[18,19],[19,20],   // pinky
     [0,17]                              // palm base
   ];
-  const INDEX_TIP = 8;
+  const FINGER_NAMES = { 4:'thumb', 8:'index finger', 12:'middle finger', 16:'ring finger', 20:'pinky' };
 
   // ---------- State ----------
   const state = {
     running:false, mouseSim:false, cameraReady:false, modelReady:false,
     mode:'glide', scale:'pentatonic', root:'C', waveform:'sine',
-    octaves:2, volume:0.65, showSkeleton:true,
+    octaves:2, volume:0.65, showSkeleton:true, pitchFinger:8,
     ticks: buildTicks('C','pentatonic',2),
     smoothX:0.5, smoothY:0.5, detected:false, lastDetectedTs:0,
     currentTickIndex:null
@@ -345,7 +355,7 @@
 
   function setNoteDisplay(freq, name){
     noteBig.textContent = name || (freq ? freq.toFixed(1)+' Hz' : '—');
-    noteSub.textContent = name ? freq.toFixed(1)+' Hz' : (freq ? 'gliding' : 'move your index finger to begin');
+    noteSub.textContent = name ? freq.toFixed(1)+' Hz' : (freq ? 'gliding' : 'move your fingertip to begin');
   }
 
   function updateAudio(xNorm, yNorm){
@@ -539,7 +549,7 @@
       const res = handLandmarker.detectForVideo(video, performance.now());
       if(res.landmarks && res.landmarks.length>0){
         landmarks = res.landmarks[0];
-        const tip = landmarks[INDEX_TIP];
+        const tip = landmarks[state.pitchFinger];
         result = { x: tip.x, y: tip.y };
       }
     }
@@ -552,7 +562,7 @@
       updateAudio(state.smoothX, state.smoothY);
       updateRailPuck(state.smoothY, true);
       statusDot.classList.add('live');
-      statusText.textContent = state.mouseSim ? 'Tracking (mouse)' : 'Tracking index finger';
+      statusText.textContent = state.mouseSim ? 'Tracking (mouse)' : ('Tracking '+FINGER_NAMES[state.pitchFinger]);
     } else {
       if(performance.now() - state.lastDetectedTs > 260){
         if(state.detected){ fadeAudioOut(); updateRailPuck(0,false); }
@@ -589,7 +599,7 @@
     updateRailPuck(0,false);
     statusDot.classList.remove('live');
     statusText.textContent = 'Camera off';
-    noteBig.textContent='—'; noteSub.textContent='move your index finger to begin';
+    noteBig.textContent='—'; noteSub.textContent='move your fingertip to begin';
   });
 
   mouseSimBox.addEventListener('change', ()=>{ state.mouseSim = mouseSimBox.checked; });
@@ -625,6 +635,10 @@
     state.ticks = buildTicks(state.root, state.scale, state.octaves);
     state.currentTickIndex = null;
     renderRail();
+  });
+  $('fingerSelect').addEventListener('change', e=>{
+    state.pitchFinger = parseInt(e.target.value,10);
+    noteSub.textContent = 'move your '+FINGER_NAMES[state.pitchFinger]+' to begin';
   });
   $('volRange').addEventListener('input', e=>{
     state.volume = parseInt(e.target.value,10)/100;
